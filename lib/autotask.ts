@@ -26,6 +26,14 @@ export interface AutotaskTicket {
   [key: string]: unknown;
 }
 
+export interface AutotaskContact {
+  id: number;
+  emailAddress?: string;
+  firstName?: string;
+  lastName?: string;
+  [key: string]: unknown;
+}
+
 // ---------------------------------------------------------------------------
 // Internal request helper
 // ---------------------------------------------------------------------------
@@ -123,6 +131,17 @@ export async function getTicket(id: number): Promise<AutotaskTicket | null> {
   )) as Record<string, unknown>;
   const item = data["item"];
   return item != null ? (item as AutotaskTicket) : null;
+}
+
+export async function getContact(
+  id: number
+): Promise<AutotaskContact | null> {
+  const data = (await request(
+    "GET",
+    `/Contacts/${id}`
+  )) as Record<string, unknown>;
+  const item = data["item"];
+  return item != null ? (item as AutotaskContact) : null;
 }
 
 export async function patchTicket(

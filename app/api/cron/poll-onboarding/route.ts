@@ -3,14 +3,48 @@ import type { NextRequest } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase";
 import { signToken } from "@/lib/token";
-import { queryTickets, patchTicket } from "@/lib/autotask";
-import type { AutotaskFilterItem } from "@/lib/autotask";
+import { queryTickets, patchTicket, getTicket, getContact } from "@/lib/autotask";
+import type { AutotaskFilterItem, AutotaskTicket } from "@/lib/autotask";
 import { sendFormLink } from "@/lib/mailer";
 import { STATUS } from "@/lib/onboarding";
 import type { OnboardingRun } from "@/lib/onboarding";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+/**
+ * Pulls the requester's email off the IEP-stamped "From:" line, e.g.
+ *   From: Mark Mekhayl <mark@example.com>
+ * Targets the From: line specifically so it never picks up the separate
+ * "message-id <guid@domain>" line in the body.
+ */
+function parseFromEmail(description: unknown): string | null {
+  if (typeof description !== "string") return null;
+  const angled = description.match(/^\s*From:.*?<([^<>@\s]+@[^<>\s]+)>/im);
+  if (angled) return angled[1];
+  const bare = description.match(/^\s*From:\s*([^\s<>@]+@[^\s<>]+)/im);
+  return bare ? bare[1] : null;
+}
+
+/**
+ * Resolves who to email the form to:
+ *   1. a real Contact record (known sender) — the clean path, or
+ *   2. the "From:" line IEP wrote into the description (unknown sender, which
+ *      has no contactID — common for first-time onboarding requests).
+ */
+async function resolveContactEmail(
+  ticket: AutotaskTicket
+): Promise<string | null> {
+  const contactId =
+    typeof ticket.contactID === "number" && ticket.contactID > 0
+      ? ticket.contactID
+      : null;
+  if (contactId) {
+    const contact = await getContact(contactId);
+    if (contact?.emailAddress) return String(contact.emailAddress);
+  }
+  return parseFromEmail(ticket.description);
+}
 
 export async function GET(request: NextRequest): Promise<Response> {
   // 1) AUTH: verify Vercel Cron secret
@@ -37,24 +71,35 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   const tickets = await queryTickets(filters);
 
-  const upsertRows = tickets.map((ticket) => {
-    const nonce = randomUUID();
-    const token = signToken({ ticketId: ticket.id, nonce });
+  // Dry-run (?dryRun=true): confirms Autotask auth + the UDF filter with ZERO
+  // side effects — no Supabase writes, no emails. The sample also reveals
+  // whether tickets carry a contact email (see the contactID resolution note).
+  if (request.nextUrl.searchParams.get("dryRun") === "true") {
+    const sample = await Promise.all(
+      tickets.slice(0, 3).map(async (t) => ({
+        id: t.id,
+        companyID: t.companyID,
+        resolvedEmail: await resolveContactEmail(t),
+      }))
+    );
+    return Response.json({ dryRun: true, discovered: tickets.length, sample });
+  }
 
-    const rawEmail = ticket.contactEmailAddress;
-    const contact_email: string | null =
-      rawEmail !== undefined && rawEmail !== null
-        ? String(rawEmail)
-        : null;
+  const upsertRows = await Promise.all(
+    tickets.map(async (ticket) => {
+      const nonce = randomUUID();
+      const token = signToken({ ticketId: ticket.id, nonce });
+      const contact_email = await resolveContactEmail(ticket);
 
-    return {
-      ticket_id: ticket.id,
-      company_id: ticket.companyID,
-      contact_email,
-      token,
-      status: STATUS.NEW,
-    };
-  });
+      return {
+        ticket_id: ticket.id,
+        company_id: ticket.companyID,
+        contact_email,
+        token,
+        status: STATUS.NEW,
+      };
+    })
+  );
 
   if (upsertRows.length > 0) {
     await supabaseAdmin()
@@ -101,8 +146,22 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   for (const row of rowsToProcess) {
     try {
-      // No contact email — mark error and skip
-      if (!row.contact_email) {
+      // Resolve a recipient. Rows captured before the resolver existed (or any
+      // row still missing an email) get a second chance from the live ticket —
+      // self-healing instead of staying stuck in `error`.
+      let contactEmail = row.contact_email;
+      if (!contactEmail) {
+        const ticket = await getTicket(row.ticket_id);
+        contactEmail = ticket ? await resolveContactEmail(ticket) : null;
+        if (contactEmail) {
+          await supabaseAdmin()
+            .from("onboarding_runs")
+            .update({ contact_email: contactEmail })
+            .eq("id", row.id);
+        }
+      }
+
+      if (!contactEmail) {
         await supabaseAdmin()
           .from("onboarding_runs")
           .update({
@@ -118,7 +177,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       const baseUrl = (process.env.APP_BASE_URL ?? "").replace(/\/+$/, "");
       const formUrl = `${baseUrl}/onboard/${row.token}`;
 
-      await sendFormLink({ to: row.contact_email, formUrl });
+      await sendFormLink({ to: contactEmail, formUrl });
 
       // Patch Autotask UDF so the ticket drops out of the poll filter
       await patchTicket(
