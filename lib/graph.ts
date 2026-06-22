@@ -1,8 +1,17 @@
 /**
  * Microsoft Graph client — Phase 2 user provisioning.
  *
- * Uses the OAuth 2.0 client-credentials flow to obtain an app token, then
- * calls the Graph API to create a new Azure AD / Entra ID user.
+ * Uses the OAuth 2.0 client-credentials flow (client credentials grant) to
+ * obtain a per-tenant app token, then calls the Graph API to create a new
+ * Azure AD / Entra ID user, read subscribed SKUs, and assign licenses.
+ *
+ * ONE multi-tenant app registration (MS_GRAPH_CLIENT_ID / MS_GRAPH_CLIENT_SECRET)
+ * is admin-consented into each client tenant. The caller supplies the target
+ * tenant_id at runtime — MS_GRAPH_TENANT_ID is no longer used.
+ *
+ * Required Graph application permissions (granted per client tenant via admin consent):
+ *   - User.ReadWrite.All  — create user + assign license
+ *   - Organization.Read.All — read subscribedSkus
  */
 
 // ---------------------------------------------------------------------------
@@ -21,20 +30,22 @@ export interface ProvisionUserResult {
   userPrincipalName: string;
 }
 
+export interface SubscribedSku {
+  skuId: string;
+  skuPartNumber: string;
+  enabled: number;
+  consumed: number;
+  available: number;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function getAppToken(): Promise<string> {
-  const tenantId = process.env.MS_GRAPH_TENANT_ID;
+async function getGraphToken(tenantId: string): Promise<string> {
   const clientId = process.env.MS_GRAPH_CLIENT_ID;
   const clientSecret = process.env.MS_GRAPH_CLIENT_SECRET;
 
-  if (!tenantId) {
-    throw new Error(
-      "graph: MS_GRAPH_TENANT_ID environment variable is not set."
-    );
-  }
   if (!clientId) {
     throw new Error(
       "graph: MS_GRAPH_CLIENT_ID environment variable is not set."
@@ -66,7 +77,7 @@ async function getAppToken(): Promise<string> {
   if (!res.ok) {
     const text = await res.text().catch(() => "(unreadable body)");
     throw new Error(
-      `graph: token request failed with HTTP ${res.status}: ${text}`
+      `graph: token request failed for tenant ${tenantId} with HTTP ${res.status}: ${text}`
     );
   }
 
@@ -85,9 +96,10 @@ async function getAppToken(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 export async function provisionUser(
+  tenantId: string,
   input: ProvisionUserInput
 ): Promise<ProvisionUserResult> {
-  const token = await getAppToken();
+  const token = await getGraphToken(tenantId);
 
   const res = await fetch("https://graph.microsoft.com/v1.0/users", {
     method: "POST",
@@ -101,6 +113,7 @@ export async function provisionUser(
       displayName: input.displayName,
       mailNickname: input.mailNickname,
       userPrincipalName: input.userPrincipalName,
+      usageLocation: process.env.MS_USAGE_LOCATION ?? "AU",
       passwordProfile: {
         forceChangePasswordNextSignIn: true,
         password: input.password,
@@ -132,4 +145,94 @@ export async function provisionUser(
   }
 
   return { id, userPrincipalName };
+}
+
+export async function listSubscribedSkus(
+  tenantId: string
+): Promise<SubscribedSku[]> {
+  const token = await getGraphToken(tenantId);
+
+  const res = await fetch("https://graph.microsoft.com/v1.0/subscribedSkus", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "(unreadable body)");
+    throw new Error(
+      `graph: GET /v1.0/subscribedSkus failed with HTTP ${res.status}: ${text}`
+    );
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  const value = data["value"];
+
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `graph: subscribedSkus response missing value array: ${JSON.stringify(data)}`
+    );
+  }
+
+  return value.map((item: unknown) => {
+    const sku = item as Record<string, unknown>;
+    const prepaidUnits = sku["prepaidUnits"] as Record<string, unknown>;
+    const enabled =
+      typeof prepaidUnits?.["enabled"] === "number"
+        ? prepaidUnits["enabled"]
+        : 0;
+    const consumed =
+      typeof sku["consumedUnits"] === "number"
+        ? (sku["consumedUnits"] as number)
+        : 0;
+    return {
+      skuId: typeof sku["skuId"] === "string" ? sku["skuId"] : "",
+      skuPartNumber:
+        typeof sku["skuPartNumber"] === "string" ? sku["skuPartNumber"] : "",
+      enabled,
+      consumed,
+      available: enabled - consumed,
+    };
+  });
+}
+
+export async function findSkuByPartNumber(
+  tenantId: string,
+  partNumber: string
+): Promise<SubscribedSku | null> {
+  const skus = await listSubscribedSkus(tenantId);
+  return skus.find((s) => s.skuPartNumber === partNumber) ?? null;
+}
+
+export async function assignLicense(
+  tenantId: string,
+  userId: string,
+  skuId: string
+): Promise<void> {
+  const token = await getGraphToken(tenantId);
+
+  const res = await fetch(
+    `https://graph.microsoft.com/v1.0/users/${userId}/assignLicense`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        addLicenses: [{ skuId, disabledPlans: [] }],
+        removeLicenses: [],
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "(unreadable body)");
+    throw new Error(
+      `graph: POST /v1.0/users/${userId}/assignLicense failed with HTTP ${res.status}: ${text}`
+    );
+  }
 }

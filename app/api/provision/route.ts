@@ -1,25 +1,44 @@
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-import { supabaseAdmin } from "@/lib/supabase";
-import { addTicketNote } from "@/lib/autotask";
-import { provisionUser } from "@/lib/graph";
-import { STATUS, type OnboardingRun, type OnboardingPayload } from "@/lib/onboarding";
 import { randomBytes } from "node:crypto";
+import { supabaseAdmin } from "@/lib/supabase";
+import { addTicketNote, createTask } from "@/lib/autotask";
+import {
+  provisionUser,
+  findSkuByPartNumber,
+  assignLicense,
+} from "@/lib/graph";
+import { STATUS, type OnboardingPayload } from "@/lib/onboarding";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function generateTempPassword(): string {
-  // 24 random bytes -> 32-char base64url string; meets most password complexity rules
-  return randomBytes(24).toString("base64url");
+  // 18 random bytes -> 24-char base64url + fixed suffix satisfying complexity
+  // requirements (uppercase, lowercase, digit, special character).
+  return `${randomBytes(18).toString("base64url")}Aa1!`;
 }
 
 function deriveMailNickname(firstName: string, lastName: string): string {
-  // Lowercase, strip non-alphanumeric, combine as firstlast
-  const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return `${clean(firstName)}${clean(lastName)}`;
+  const sanitize = (s: string) =>
+    s.toLowerCase().replace(/[^a-z0-9.]/g, "");
+  return `${sanitize(firstName)}.${sanitize(lastName)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Route
+// ---------------------------------------------------------------------------
+
+type ProvisionRow = {
+  status: string;
+  payload: OnboardingPayload | null;
+  company_id: number;
+};
+
 export async function POST(request: Request): Promise<Response> {
-  // Auth: require Bearer <CRON_SECRET>
+  // 1. AUTH: require Bearer <CRON_SECRET>
   const authHeader = request.headers.get("authorization") ?? "";
   const cronSecret = process.env.CRON_SECRET;
 
@@ -27,7 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Parse body
+  // 2. Parse body
   let rawBody: unknown;
   try {
     rawBody = await request.json();
@@ -48,12 +67,12 @@ export async function POST(request: Request): Promise<Response> {
 
   const ticketId = (rawBody as Record<string, unknown>)["ticketId"] as number;
 
-  // Look up the onboarding run
+  // 3. Look up the onboarding run
   const { data: row, error: fetchError } = await supabaseAdmin()
     .from("onboarding_runs")
-    .select("*")
+    .select("status, payload, company_id")
     .eq("ticket_id", ticketId)
-    .maybeSingle<OnboardingRun>();
+    .maybeSingle<ProvisionRow>();
 
   if (fetchError) {
     console.error("[provision] Supabase fetch error:", fetchError);
@@ -61,7 +80,10 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (!row) {
-    return Response.json({ error: "Onboarding run not found" }, { status: 404 });
+    return Response.json(
+      { error: "Onboarding run not found" },
+      { status: 404 }
+    );
   }
 
   if (row.status !== STATUS.FORM_RECEIVED || !row.payload) {
@@ -71,34 +93,91 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // Guard: Graph must be configured
-  if (!process.env.MS_GRAPH_TENANT_ID) {
+  // 4. Guard: Graph must be configured
+  if (!process.env.MS_GRAPH_CLIENT_ID) {
     return Response.json(
       { error: "Microsoft Graph not configured" },
       { status: 501 }
     );
   }
 
-  const payload = row.payload as OnboardingPayload;
+  // 5. Resolve M365 tenant for this company
+  const { data: mapping } = await supabaseAdmin()
+    .from("company_m365")
+    .select("tenant_id, active")
+    .eq("company_id", row.company_id)
+    .maybeSingle();
+
+  const m = mapping as { tenant_id: string; active: boolean } | null;
+
+  if (!m || m.active === false || !m.tenant_id) {
+    // Best-effort ticket note — don't let a failure here mask the real error
+    try {
+      await addTicketNote(
+        ticketId,
+        "M365 provisioning blocked",
+        `No active M365 tenant mapping for Autotask company ${row.company_id}. Add a row to company_m365.`
+      );
+    } catch (noteErr) {
+      console.error(
+        "[provision] Failed to add blocking ticket note:",
+        noteErr instanceof Error ? noteErr.message : String(noteErr)
+      );
+    }
+
+    await supabaseAdmin()
+      .from("onboarding_runs")
+      .update({
+        status: STATUS.ERROR,
+        error: `no M365 tenant mapping for company ${row.company_id}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("ticket_id", ticketId);
+
+    return Response.json(
+      { status: "blocked", reason: "no tenant mapping" },
+      { status: 409 }
+    );
+  }
+
+  const tenantId = m.tenant_id;
+
+  // 6. Build user inputs from payload
+  const payload = row.payload;
   const displayName = `${payload.employeeFirstName} ${payload.employeeLastName}`;
   const mailNickname = deriveMailNickname(
     payload.employeeFirstName,
     payload.employeeLastName
   );
   const tempPassword = generateTempPassword();
+  const partNumber =
+    process.env.MS_LICENSE_SKU_PART_NUMBER ?? "O365_BUSINESS_PREMIUM";
 
-  let provisionResult: { id: string; userPrincipalName: string };
+  // 7. Graph work — any failure here marks the row ERROR and returns 502
+  let createdUser: { id: string; userPrincipalName: string };
+  let skuAvailable: boolean;
+  let skuFound: boolean;
+  let skuId: string | undefined;
 
   try {
-    provisionResult = await provisionUser({
+    createdUser = await provisionUser(tenantId, {
       displayName,
       mailNickname,
       userPrincipalName: payload.employeeEmail,
       password: tempPassword,
     });
+
+    const sku = await findSkuByPartNumber(tenantId, partNumber);
+    skuFound = sku !== null;
+    skuAvailable = sku !== null && sku.available > 0;
+
+    if (skuAvailable && sku !== null) {
+      skuId = sku.skuId;
+      await assignLicense(tenantId, createdUser.id, sku.skuId);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[provision] provisionUser failed:", message);
+    console.error("[provision] Graph operation failed:", message);
 
     await supabaseAdmin()
       .from("onboarding_runs")
@@ -110,37 +189,84 @@ export async function POST(request: Request): Promise<Response> {
       .eq("ticket_id", ticketId);
 
     return Response.json(
-      { error: "Microsoft Graph user creation failed." },
+      { error: "Microsoft Graph operation failed." },
       { status: 502 }
     );
   }
 
-  // Update row to COMPLETE and add ticket note
+  // 8. Post-Graph Autotask writeback + row update (mirrors submit/route.ts pattern)
+  if (skuAvailable && skuId !== undefined) {
+    // Path A: user created and license assigned
+    try {
+      await addTicketNote(
+        ticketId,
+        "M365 user provisioned",
+        `Created ${createdUser.userPrincipalName} and assigned ${partNumber}.`
+      );
+
+      await supabaseAdmin()
+        .from("onboarding_runs")
+        .update({
+          status: STATUS.COMPLETE,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("ticket_id", ticketId);
+    } catch (err) {
+      // User + license are confirmed in Azure; log but don't 502
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        "[provision] Post-provision writeback failed (user+license created):",
+        message
+      );
+    }
+
+    return Response.json({
+      status: "complete",
+      userPrincipalName: createdUser.userPrincipalName,
+      licenseAssigned: true,
+    });
+  }
+
+  // Path B: user created but no free seat — flag for Synnex ordering
+  const reason = skuFound ? "no free seat" : "sku not in tenant";
+
   try {
+    await addTicketNote(
+      ticketId,
+      "M365 user created — license pending",
+      `Created ${createdUser.userPrincipalName}. No free ${partNumber} seat — order one from Synnex, then assign.`
+    );
+
+    await createTask({
+      companyId: row.company_id,
+      title: `Order M365 Business Standard from Synnex – ${createdUser.userPrincipalName}`,
+      description: `A new seat for ${partNumber} must be ordered from Synnex and assigned to ${createdUser.userPrincipalName}.`,
+      queueId: process.env.AUTOTASK_REQUISITION_QUEUE_ID
+        ? Number(process.env.AUTOTASK_REQUISITION_QUEUE_ID)
+        : undefined,
+    });
+
     await supabaseAdmin()
       .from("onboarding_runs")
       .update({
-        status: STATUS.COMPLETE,
+        status: STATUS.PROVISIONED,
         updated_at: new Date().toISOString(),
       })
       .eq("ticket_id", ticketId);
-
-    await addTicketNote(
-      ticketId,
-      "M365 user provisioned",
-      `Created ${provisionResult.userPrincipalName}`
-    );
   } catch (err) {
-    // The user was created successfully in Azure; log but don't 502
+    // User exists in Azure unlicensed; log but don't 502 — the status update
+    // may have partially succeeded; a retry would re-read PROVISIONED and skip.
     const message = err instanceof Error ? err.message : String(err);
     console.error(
-      "[provision] Post-provision cleanup failed (user was created):",
+      "[provision] Synnex-flag writeback failed (user created, unlicensed):",
       message
     );
   }
 
   return Response.json({
-    status: "complete",
-    userPrincipalName: provisionResult.userPrincipalName,
+    status: "provisioned",
+    userPrincipalName: createdUser.userPrincipalName,
+    licenseAssigned: false,
+    reason,
   });
 }

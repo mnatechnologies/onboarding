@@ -194,7 +194,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               value={fields.jobTitle}
               onChange={handleChange}
               className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
-              placeholder="Software Engineer"
+              placeholder="Office Manager"
               disabled={submitting}
             />
           </div>
@@ -213,7 +213,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               value={fields.department}
               onChange={handleChange}
               className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
-              placeholder="Engineering"
+              placeholder="Adminstration"
               disabled={submitting}
             />
           </div>
@@ -278,7 +278,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               value={fields.hardwareDetails}
               onChange={handleChange}
               className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 resize-y"
-              placeholder="e.g. MacBook Pro 14-inch, external monitor, keyboard, mouse"
+              placeholder="e.g. Dell Laptop, external monitor, keyboard, mouse"
               disabled={submitting}
             />
           </div>
@@ -305,7 +305,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
             value={fields.softwareNeeded}
             onChange={handleChange}
             className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 resize-y"
-            placeholder="e.g. Adobe Creative Suite, Slack, Figma, Visual Studio Code"
+            placeholder="e.g. Microsoft 365 account, etc. Please specify permissions if possible. Site visibilities, access levels, etc."
             disabled={submitting}
           />
         </div>

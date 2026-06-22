@@ -1,3 +1,7 @@
+-- Baseline schema (already applied). Incremental changes live in
+-- supabase/migrations/ — add a new timestamped file there rather than editing
+-- this one. A fresh database runs this file, then every migration in order.
+--
 -- Onboarding state table.
 --
 -- `ticket_id unique` is what gives idempotency for free — the poll's insert
