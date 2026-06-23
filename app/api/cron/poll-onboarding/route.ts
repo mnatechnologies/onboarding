@@ -109,20 +109,24 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   const discovered = upsertRows.length;
 
-  // 3) DRIVE + RECONCILE: find rows that need a form link sent
-  const staleThreshold = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-
-  const [actionableResult, staleResult] = await Promise.all([
+  // 3) DRIVE: find rows that need a form link sent. Two disjoint sources:
+  //   • initial send — never been mailed (form_sent_at is null) and either
+  //     freshly discovered (new) or recovering from a send failure (error).
+  //   • resend — an operator flipped resend_requested via /api/onboard/resend.
+  // There is deliberately NO time-based auto-resend: a pending (unfilled) form
+  // is left alone, so we never re-mail a recipient on a timer.
+  const [initialResult, resendResult] = await Promise.all([
     supabaseAdmin()
       .from("onboarding_runs")
       .select("*")
       .or("status.eq.new,status.eq.error")
+      .is("form_sent_at", null)
       .limit(25),
     supabaseAdmin()
       .from("onboarding_runs")
       .select("*")
-      .eq("status", "form_sent")
-      .lt("updated_at", staleThreshold)
+      .eq("resend_requested", true)
+      .in("status", [STATUS.FORM_SENT, STATUS.ERROR])
       .limit(25),
   ]);
 
@@ -131,8 +135,8 @@ export async function GET(request: NextRequest): Promise<Response> {
   const rowsToProcess: OnboardingRun[] = [];
 
   for (const row of [
-    ...(actionableResult.data ?? []),
-    ...(staleResult.data ?? []),
+    ...(initialResult.data ?? []),
+    ...(resendResult.data ?? []),
   ]) {
     const run = row as OnboardingRun;
     if (!seen.has(run.id)) {
@@ -177,30 +181,47 @@ export async function GET(request: NextRequest): Promise<Response> {
       const baseUrl = (process.env.APP_BASE_URL ?? "").replace(/\/+$/, "");
       const formUrl = `${baseUrl}/onboard/${row.token}`;
 
+      // Send the link. If this throws we fall to the catch and the row keeps a
+      // null form_sent_at, so the initial-send query retries it — a genuine
+      // send failure is the one case we DO want to re-attempt.
       await sendFormLink({ to: contactEmail, formUrl });
 
-      // Patch Autotask UDF so the ticket drops out of the poll filter
-      await patchTicket(
-        row.ticket_id,
-        {},
-        [
-          {
-            name: process.env.AUTOTASK_STAGE_UDF_NAME as string,
-            value: "form_sent",
-          },
-        ]
-      );
-
+      // Commit the "sent" fact immediately. form_sent_at is the persisted,
+      // once-only gate (a local flag can't survive between stateless cron
+      // runs); clearing resend_requested consumes any pending resend request.
       await supabaseAdmin()
         .from("onboarding_runs")
         .update({
           status: STATUS.FORM_SENT,
+          form_sent_at: new Date().toISOString(),
+          resend_requested: false,
           error: null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", row.id);
 
       sent++;
+
+      // Advance the Autotask UDF so discovery stops returning this ticket.
+      // Isolated in its own try: the email already went out and form_sent_at is
+      // set, so a patch failure must neither resend nor flip the row to error.
+      try {
+        await patchTicket(
+          row.ticket_id,
+          {},
+          [
+            {
+              name: process.env.AUTOTASK_STAGE_UDF_NAME as string,
+              value: "form_sent",
+            },
+          ]
+        );
+      } catch (patchErr: unknown) {
+        console.error(
+          `poll-onboarding: patchTicket failed for ticket ${row.ticket_id}`,
+          patchErr
+        );
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : String(err);

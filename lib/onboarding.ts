@@ -29,6 +29,17 @@ export interface OnboardingRun {
   status: Status;
   payload: OnboardingPayload | null;
   error: string | null;
+  /**
+   * When the form link was last emailed; null until the first successful send.
+   * The poll's once-only gate — a non-null value means "already sent", so the
+   * initial-send query skips it. Replaces the old time-based auto-resend.
+   */
+  form_sent_at: string | null;
+  /**
+   * Operator-set resend lever (POST /api/onboard/resend). When true, the next
+   * poll mails one more link and clears it back to false.
+   */
+  resend_requested: boolean;
   created_at: string;
   updated_at: string;
 }
