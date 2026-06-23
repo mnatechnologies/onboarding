@@ -32,6 +32,13 @@ const INITIAL_FIELDS: FormFields = {
   notes: "",
 };
 
+// MNAWeb input idiom — defined once so every field stays visually identical.
+const FIELD_CLASS =
+  "w-full px-4 py-3 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:border-[#0066cc] focus:ring-2 focus:ring-[#0066cc]/20 outline-none transition-all disabled:bg-gray-50 disabled:text-gray-500";
+const LABEL_CLASS = "block text-sm font-medium text-gray-700 mb-2";
+const LEGEND_CLASS =
+  "text-[#0066cc] font-semibold text-sm uppercase tracking-wider";
+
 export default function OnboardingForm({ token }: OnboardingFormProps) {
   const [fields, setFields] = useState<FormFields>(INITIAL_FIELDS);
   const [submitting, setSubmitting] = useState(false);
@@ -81,9 +88,9 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
   if (done) {
     return (
       <div className="text-center py-8">
-        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
           <svg
-            className="w-6 h-6 text-green-600"
+            className="w-7 h-7 text-green-600"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -100,7 +107,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
         <h2 className="text-xl font-semibold text-gray-900 mb-2">
           Details submitted successfully
         </h2>
-        <p className="text-gray-500 text-sm">
+        <p className="text-gray-500 text-sm leading-relaxed">
           Thanks! Your details have been submitted. Your IT team will be in
           touch before your start date.
         </p>
@@ -109,19 +116,14 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-6">
+    <form onSubmit={handleSubmit} noValidate className="space-y-8">
       {/* Personal details */}
       <fieldset className="space-y-4">
-        <legend className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-          Employee details
-        </legend>
+        <legend className={LEGEND_CLASS}>Employee details</legend>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label
-              htmlFor="employeeFirstName"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
+            <label htmlFor="employeeFirstName" className={LABEL_CLASS}>
               First name <span className="text-red-500">*</span>
             </label>
             <input
@@ -131,17 +133,14 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               required
               value={fields.employeeFirstName}
               onChange={handleChange}
-              className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+              className={FIELD_CLASS}
               placeholder="Jane"
               disabled={submitting}
             />
           </div>
 
           <div>
-            <label
-              htmlFor="employeeLastName"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
+            <label htmlFor="employeeLastName" className={LABEL_CLASS}>
               Last name <span className="text-red-500">*</span>
             </label>
             <input
@@ -151,7 +150,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               required
               value={fields.employeeLastName}
               onChange={handleChange}
-              className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+              className={FIELD_CLASS}
               placeholder="Smith"
               disabled={submitting}
             />
@@ -159,10 +158,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
         </div>
 
         <div>
-          <label
-            htmlFor="employeeEmail"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
+          <label htmlFor="employeeEmail" className={LABEL_CLASS}>
             Work email address <span className="text-red-500">*</span>
           </label>
           <input
@@ -172,7 +168,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
             required
             value={fields.employeeEmail}
             onChange={handleChange}
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+            className={FIELD_CLASS}
             placeholder="jane.smith@example.com"
             disabled={submitting}
           />
@@ -180,10 +176,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label
-              htmlFor="jobTitle"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
+            <label htmlFor="jobTitle" className={LABEL_CLASS}>
               Job title <span className="text-red-500">*</span>
             </label>
             <input
@@ -193,17 +186,14 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               required
               value={fields.jobTitle}
               onChange={handleChange}
-              className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+              className={FIELD_CLASS}
               placeholder="Office Manager"
               disabled={submitting}
             />
           </div>
 
           <div>
-            <label
-              htmlFor="department"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
+            <label htmlFor="department" className={LABEL_CLASS}>
               Department
             </label>
             <input
@@ -212,18 +202,15 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               type="text"
               value={fields.department}
               onChange={handleChange}
-              className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
-              placeholder="Adminstration"
+              className={FIELD_CLASS}
+              placeholder="Administration"
               disabled={submitting}
             />
           </div>
         </div>
 
         <div>
-          <label
-            htmlFor="startDate"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
+          <label htmlFor="startDate" className={LABEL_CLASS}>
             Start date <span className="text-red-500">*</span>
           </label>
           <input
@@ -233,7 +220,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
             required
             value={fields.startDate}
             onChange={handleChange}
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+            className={FIELD_CLASS}
             disabled={submitting}
           />
         </div>
@@ -241,9 +228,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
 
       {/* Hardware */}
       <fieldset className="space-y-4">
-        <legend className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-          Hardware requirements
-        </legend>
+        <legend className={LEGEND_CLASS}>Hardware requirements</legend>
 
         <div className="flex items-start gap-3">
           <input
@@ -252,7 +237,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
             type="checkbox"
             checked={fields.needsHardware}
             onChange={handleChange}
-            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#0066cc] focus:ring-[#0066cc]"
             disabled={submitting}
           />
           <label
@@ -265,10 +250,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
 
         {fields.needsHardware && (
           <div>
-            <label
-              htmlFor="hardwareDetails"
-              className="block text-sm font-medium text-gray-700 mb-1"
-            >
+            <label htmlFor="hardwareDetails" className={LABEL_CLASS}>
               Hardware details
             </label>
             <textarea
@@ -277,7 +259,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
               rows={3}
               value={fields.hardwareDetails}
               onChange={handleChange}
-              className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 resize-y"
+              className={`${FIELD_CLASS} resize-y`}
               placeholder="e.g. Dell Laptop, external monitor, keyboard, mouse"
               disabled={submitting}
             />
@@ -287,15 +269,12 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
 
       {/* Software and additional info */}
       <fieldset className="space-y-4">
-        <legend className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+        <legend className={LEGEND_CLASS}>
           Software and additional information
         </legend>
 
         <div>
-          <label
-            htmlFor="softwareNeeded"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
+          <label htmlFor="softwareNeeded" className={LABEL_CLASS}>
             Software needed
           </label>
           <textarea
@@ -304,17 +283,14 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
             rows={3}
             value={fields.softwareNeeded}
             onChange={handleChange}
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 resize-y"
+            className={`${FIELD_CLASS} resize-y`}
             placeholder="e.g. Microsoft 365 account, etc. Please specify permissions if possible. Site visibilities, access levels, etc."
             disabled={submitting}
           />
         </div>
 
         <div>
-          <label
-            htmlFor="notes"
-            className="block text-sm font-medium text-gray-700 mb-1"
-          >
+          <label htmlFor="notes" className={LABEL_CLASS}>
             Additional notes
           </label>
           <textarea
@@ -323,7 +299,7 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
             rows={3}
             value={fields.notes}
             onChange={handleChange}
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500 resize-y"
+            className={`${FIELD_CLASS} resize-y`}
             placeholder="Any other information the IT team should know"
             disabled={submitting}
           />
@@ -343,10 +319,13 @@ export default function OnboardingForm({ token }: OnboardingFormProps) {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors"
+          className="w-full py-4 bg-[#0066cc] text-white font-semibold rounded-lg hover:bg-[#0052a3] transition-colors shadow-lg shadow-blue-500/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0066cc] focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {submitting ? "Submitting..." : "Submit onboarding details"}
+          {submitting ? "Submitting…" : "Submit onboarding details"}
         </button>
+        <p className="text-xs text-gray-400 text-center mt-3">
+          Your information is sent securely to the MNA Technologies IT team.
+        </p>
       </div>
     </form>
   );
